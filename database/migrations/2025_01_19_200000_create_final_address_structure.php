@@ -6,9 +6,16 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * Estrutura Final Otimizada - 5 Tabelas
+     * Atende todos os requisitos do tech lead:
+     * - Hierarquia: distrito > concelho > freguesia > localidade
+     * - Busca por código postal tipo GeoAPI
+     * - Simples mas completa
+     */
     public function up(): void
     {
-        // Tabela de distritos - Essencial (20 registros)
+        // 1. DISTRITOS - Base da hierarquia (20 registros)
         Schema::create('distritos', function (Blueprint $table) {
             $table->string('codigo', 2)->primary();
             $table->string('nome', 100);
@@ -17,7 +24,7 @@ return new class extends Migration
             $table->index('nome');
         });
 
-        // Tabela de concelhos - Essencial (300+ registros)
+        // 2. CONCELHOS - Subdivisão dos distritos (300+ registros)
         Schema::create('concelhos', function (Blueprint $table) {
             $table->id();
             $table->string('codigo_distrito', 2);
@@ -31,14 +38,13 @@ return new class extends Migration
             $table->index('codigo_distrito');
         });
 
-        // Tabela de localidades - Essencial (50k+ registros)
-        Schema::create('localidades', function (Blueprint $table) {
+        // 3. FREGUESIAS - Subdivisão dos concelhos (4k+ registros)
+        Schema::create('freguesias', function (Blueprint $table) {
             $table->id();
             $table->string('codigo_distrito', 2);
             $table->string('codigo_concelho', 2);
-            $table->string('codigo_localidade', 10);
+            $table->string('codigo_freguesia', 6)->nullable();
             $table->string('nome', 150);
-            $table->string('nome_comum', 150)->nullable(); // Para buscas simplificadas
             $table->timestamps();
             
             $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
@@ -46,13 +52,36 @@ return new class extends Migration
                   ->references(['codigo_distrito', 'codigo_concelho'])
                   ->on('concelhos')
                   ->onDelete('cascade');
-            $table->unique(['codigo_distrito', 'codigo_concelho', 'codigo_localidade']);
+            
+            $table->unique(['codigo_distrito', 'codigo_concelho', 'nome']);
             $table->index('nome');
             $table->index(['codigo_distrito', 'codigo_concelho']);
         });
 
-        // Tabela de códigos postais - Simplificada
-        // Apenas dados essenciais para formulário
+        // 4. LOCALIDADES - Cidades, vilas e aldeias (50k+ registros)
+        Schema::create('localidades', function (Blueprint $table) {
+            $table->id();
+            $table->string('codigo_distrito', 2);
+            $table->string('codigo_concelho', 2);
+            $table->string('codigo_localidade', 10);
+            $table->string('nome', 150);
+            $table->unsignedBigInteger('freguesia_id')->nullable();
+            $table->timestamps();
+            
+            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
+            $table->foreign(['codigo_distrito', 'codigo_concelho'])
+                  ->references(['codigo_distrito', 'codigo_concelho'])
+                  ->on('concelhos')
+                  ->onDelete('cascade');
+            $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
+            
+            $table->unique(['codigo_distrito', 'codigo_concelho', 'codigo_localidade']);
+            $table->index('nome');
+            $table->index(['codigo_distrito', 'codigo_concelho']);
+            $table->index('freguesia_id');
+        });
+
+        // 5. CÓDIGOS POSTAIS - Busca tipo GeoAPI (300k+ registros)
         Schema::create('codigos_postais', function (Blueprint $table) {
             $table->id();
             $table->string('cp4', 4);
@@ -61,20 +90,23 @@ return new class extends Migration
             $table->string('codigo_concelho', 2);
             $table->string('codigo_localidade', 10);
             $table->unsignedBigInteger('localidade_id')->nullable();
+            $table->unsignedBigInteger('freguesia_id')->nullable();
             $table->string('designacao_postal', 200);
-            $table->string('morada_completa', 500)->nullable(); // Campo combinado opcional
+            $table->string('morada', 500)->nullable(); // Morada simplificada se houver
             $table->timestamps();
             
             $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
             $table->foreign('localidade_id')->references('id')->on('localidades')->onDelete('set null');
+            $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
             
-            // Índices otimizados para buscas comuns
+            // Índices otimizados para busca tipo GeoAPI
             $table->unique(['cp4', 'cp3']);
             $table->index('cp4');
-            $table->index(['cp4', 'cp3']); // Busca por código postal completo
+            $table->index(['cp4', 'cp3']);
             $table->index('designacao_postal');
             $table->index(['codigo_distrito', 'codigo_concelho']);
             $table->index('localidade_id');
+            $table->index('freguesia_id');
         });
     }
 
@@ -82,6 +114,7 @@ return new class extends Migration
     {
         Schema::dropIfExists('codigos_postais');
         Schema::dropIfExists('localidades');
+        Schema::dropIfExists('freguesias');
         Schema::dropIfExists('concelhos');
         Schema::dropIfExists('distritos');
     }

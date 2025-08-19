@@ -14,7 +14,7 @@ class ImportCttData extends Command
                             {--batch-size=5000 : Tamanho do batch para processamento}
                             {--memory-limit=256 : Limite de memória em MB}';
 
-    protected $description = 'Importa dados CTT essenciais para formulários de endereço (estrutura simplificada)';
+    protected $description = 'Importa dados CTT com estrutura completa (5 tabelas: distrito > concelho > freguesia > localidade > CP)';
 
     private $dataPath;
     private $batchSize;
@@ -24,12 +24,14 @@ class ImportCttData extends Command
     private $distritosCache = [];
     private $concelhosCache = [];
     private $localidadesCache = [];
+    private $freguesiasCache = [];
     
     // Contadores para estatísticas
     private $stats = [
         'distritos' => 0,
         'concelhos' => 0,
         'localidades' => 0,
+        'freguesias' => 0,
         'codigos_postais' => 0,
     ];
 
@@ -82,7 +84,7 @@ class ImportCttData extends Command
     {
         DB::statement('SET FOREIGN_KEY_CHECKS=0');
         
-        $tables = ['codigos_postais', 'localidades', 'concelhos', 'distritos'];
+        $tables = ['codigos_postais', 'localidades', 'freguesias', 'concelhos', 'distritos'];
         $bar = $this->output->createProgressBar(count($tables));
         
         foreach ($tables as $table) {
@@ -177,7 +179,7 @@ class ImportCttData extends Command
 
     private function importCodigosPostaisOptimized()
     {
-        $this->info('📮 Importando códigos postais e localidades...');
+        $this->info('📮 Importando códigos postais, localidades e freguesias...');
         
         $file = $this->dataPath . '/todos_cp.txt';
         if (!file_exists($file)) {
@@ -189,6 +191,7 @@ class ImportCttData extends Command
         $bar = $this->output->createProgressBar($estimatedLines);
         
         $batchLocalidades = [];
+        $batchFreguesias = [];
         $batchCodigosPostais = [];
         
         $lineCount = 0;
@@ -217,9 +220,24 @@ class ImportCttData extends Command
                         $this->localidadesCache[$localidadeKey] = true;
                     }
                     
-                    // Código postal com morada combinada (se tiver arruamento)
+                    // Freguesias (usando designacao_postal como nome da freguesia)
+                    if (!empty($data['designacao_postal'])) {
+                        $freguesiaKey = "{$data['codigo_distrito']}_{$data['codigo_concelho']}_{$data['designacao_postal']}";
+                        if (!isset($this->freguesiasCache[$freguesiaKey])) {
+                            $batchFreguesias[$freguesiaKey] = [
+                                'codigo_distrito' => $data['codigo_distrito'],
+                                'codigo_concelho' => $data['codigo_concelho'],
+                                'nome' => $data['designacao_postal'],
+                                'created_at' => now(),
+                                'updated_at' => now()
+                            ];
+                            $this->freguesiasCache[$freguesiaKey] = true;
+                        }
+                    }
+                    
+                    // Código postal com morada simplificada
                     $cpKey = "{$data['cp4']}_{$data['cp3']}";
-                    $moradaCompleta = $this->buildMoradaCompleta($data);
+                    $morada = $this->buildMoradaCompleta($data);
                     
                     $batchCodigosPostais[$cpKey] = [
                         'codigo_distrito' => $data['codigo_distrito'],
@@ -228,7 +246,7 @@ class ImportCttData extends Command
                         'cp4' => $data['cp4'],
                         'cp3' => $data['cp3'],
                         'designacao_postal' => $data['designacao_postal'],
-                        'morada_completa' => $moradaCompleta,
+                        'morada' => $morada,
                         'created_at' => now(),
                         'updated_at' => now()
                     ];
@@ -239,10 +257,11 @@ class ImportCttData extends Command
             
             // Processa batch quando atinge o limite
             if ($processedCount >= $this->batchSize) {
-                $this->processBulkInserts($batchLocalidades, $batchCodigosPostais);
+                $this->processBulkInserts($batchLocalidades, $batchFreguesias, $batchCodigosPostais);
                 
                 // Limpa batches
                 $batchLocalidades = [];
+                $batchFreguesias = [];
                 $batchCodigosPostais = [];
                 $processedCount = 0;
                 
@@ -258,7 +277,7 @@ class ImportCttData extends Command
         
         // Processa últimos registros
         if ($processedCount > 0) {
-            $this->processBulkInserts($batchLocalidades, $batchCodigosPostais);
+            $this->processBulkInserts($batchLocalidades, $batchFreguesias, $batchCodigosPostais);
         }
         
         $bar->finish();
@@ -268,13 +287,19 @@ class ImportCttData extends Command
         $this->updateForeignKeys();
     }
 
-    private function processBulkInserts($localidades, $codigosPostais)
+    private function processBulkInserts($localidades, $freguesias, $codigosPostais)
     {
-        DB::transaction(function() use ($localidades, $codigosPostais) {
+        DB::transaction(function() use ($localidades, $freguesias, $codigosPostais) {
             // Bulk insert localidades
             if (!empty($localidades)) {
                 DB::table('localidades')->insertOrIgnore(array_values($localidades));
                 $this->stats['localidades'] += count($localidades);
+            }
+            
+            // Bulk insert freguesias
+            if (!empty($freguesias)) {
+                DB::table('freguesias')->insertOrIgnore(array_values($freguesias));
+                $this->stats['freguesias'] += count($freguesias);
             }
             
             // Bulk insert códigos postais
@@ -333,6 +358,34 @@ class ImportCttData extends Command
             WHERE cp.localidade_id IS NULL
         ");
         
+        // Atualiza freguesia_id nos códigos postais
+        DB::statement("
+            UPDATE codigos_postais cp
+            INNER JOIN freguesias f ON 
+                cp.codigo_distrito = f.codigo_distrito AND
+                cp.codigo_concelho = f.codigo_concelho AND
+                cp.designacao_postal = f.nome
+            SET cp.freguesia_id = f.id
+            WHERE cp.freguesia_id IS NULL
+        ");
+        
+        // Atualiza freguesia_id nas localidades (baseado na designação postal mais comum)
+        DB::statement("
+            UPDATE localidades l
+            INNER JOIN (
+                SELECT 
+                    cp.localidade_id,
+                    cp.freguesia_id,
+                    COUNT(*) as freq
+                FROM codigos_postais cp
+                WHERE cp.localidade_id IS NOT NULL 
+                AND cp.freguesia_id IS NOT NULL
+                GROUP BY cp.localidade_id, cp.freguesia_id
+            ) AS freq_table ON l.id = freq_table.localidade_id
+            SET l.freguesia_id = freq_table.freguesia_id
+            WHERE l.freguesia_id IS NULL
+        ");
+        
         $this->info('✓ Foreign keys atualizadas');
     }
 
@@ -341,6 +394,10 @@ class ImportCttData extends Command
         // Mantém apenas últimos 10k registros no cache
         if (count($this->localidadesCache) > 10000) {
             $this->localidadesCache = array_slice($this->localidadesCache, -5000, null, true);
+        }
+        
+        if (count($this->freguesiasCache) > 10000) {
+            $this->freguesiasCache = array_slice($this->freguesiasCache, -5000, null, true);
         }
         
         // Força garbage collection
@@ -413,6 +470,7 @@ class ImportCttData extends Command
                 ['Distritos', number_format($this->stats['distritos'])],
                 ['Concelhos', number_format($this->stats['concelhos'])],
                 ['Localidades', number_format($this->stats['localidades'])],
+                ['Freguesias', number_format($this->stats['freguesias'])],
                 ['Códigos Postais', number_format($this->stats['codigos_postais'])]
             ]
         );
