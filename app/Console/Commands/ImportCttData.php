@@ -49,13 +49,13 @@ class ImportCttData extends Command
             return 1;
         }
 
-        $this->info('🚀 Iniciando importação OTIMIZADA de dados CTT...');
-        $this->info("📊 Batch size: {$this->batchSize} | Memory limit: {$this->memoryLimit}MB");
+        $this->info('Iniciando importação OTIMIZADA de dados CTT...');
+        $this->info("Batch size: {$this->batchSize} | Memory limit: {$this->memoryLimit}MB");
         $this->newLine();
 
         try {
             if ($this->option('force')) {
-                $this->warn('⚠️  Modo force ativado. Limpando dados existentes...');
+                $this->warn('Modo force ativado. Limpando dados existentes...');
                 $this->cleanDatabase();
             }
 
@@ -65,13 +65,13 @@ class ImportCttData extends Command
             $this->importCodigosPostaisOptimized();
             
             $this->newLine();
-            $this->info('✅ Importação concluída com sucesso!');
+            $this->info('Importação concluída com sucesso!');
             $this->displaySummary();
             
             return 0;
             
         } catch (\Exception $e) {
-            $this->error('❌ Erro durante a importação: ' . $e->getMessage());
+            $this->error('Erro durante a importação: ' . $e->getMessage());
             Log::error('Erro na importação CTT otimizada', [
                 'exception' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
@@ -99,7 +99,7 @@ class ImportCttData extends Command
 
     private function importDistritos()
     {
-        $this->info('📍 Importando distritos...');
+        $this->info('Importando distritos...');
         
         $file = $this->dataPath . '/distritos.txt';
         if (!file_exists($file)) {
@@ -130,12 +130,12 @@ class ImportCttData extends Command
             $this->stats['distritos'] = count($data);
         }
         
-        $this->info("✓ {$this->stats['distritos']} distritos importados");
+        $this->info("{$this->stats['distritos']} distritos importados");
     }
 
     private function importConcelhos()
     {
-        $this->info('🏘️ Importando concelhos...');
+        $this->info('Importando concelhos...');
         
         $file = $this->dataPath . '/concelhos.txt';
         if (!file_exists($file)) {
@@ -174,12 +174,12 @@ class ImportCttData extends Command
             $this->stats['concelhos'] = count($data);
         }
         
-        $this->info("✓ {$this->stats['concelhos']} concelhos importados");
+        $this->info("{$this->stats['concelhos']} concelhos importados");
     }
 
     private function importCodigosPostaisOptimized()
     {
-        $this->info('📮 Importando códigos postais, localidades e freguesias...');
+        $this->info('Importando códigos postais, localidades e freguesias...');
         
         $file = $this->dataPath . '/todos_cp.txt';
         if (!file_exists($file)) {
@@ -268,7 +268,7 @@ class ImportCttData extends Command
                 // Limpa cache periodicamente para evitar memory leak
                 if ($lineCount % 50000 === 0) {
                     $this->clearCachePeriodically();
-                    $this->info("\n💾 Cache limpo após {$lineCount} linhas. Memória: " . $this->getMemoryUsage());
+                    $this->info("\nCache limpo após {$lineCount} linhas. Memória: " . $this->getMemoryUsage());
                 }
             }
             
@@ -345,7 +345,7 @@ class ImportCttData extends Command
 
     private function updateForeignKeys()
     {
-        $this->info('🔗 Atualizando foreign keys...');
+        $this->info('Atualizando foreign keys...');
         
         // Atualiza localidade_id nos códigos postais
         DB::statement("
@@ -386,7 +386,7 @@ class ImportCttData extends Command
             WHERE l.freguesia_id IS NULL
         ");
         
-        $this->info('✓ Foreign keys atualizadas');
+        $this->info('Foreign keys atualizadas');
     }
 
     private function clearCachePeriodically()
@@ -475,6 +475,6 @@ class ImportCttData extends Command
             ]
         );
         
-        $this->info('💾 Memória utilizada: ' . $this->getMemoryUsage());
+        $this->info('Memória utilizada: ' . $this->getMemoryUsage());
     }
 }
