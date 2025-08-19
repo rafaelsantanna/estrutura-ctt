@@ -75,7 +75,7 @@ return new class extends Migration
                   ->onDelete('cascade');
             $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
             
-            $table->unique(['codigo_distrito', 'codigo_concelho', 'codigo_localidade']);
+            $table->unique(['codigo_distrito', 'codigo_concelho', 'codigo_localidade'], 'localidades_unique');
             $table->index('nome');
             $table->index(['codigo_distrito', 'codigo_concelho']);
             $table->index('freguesia_id');
