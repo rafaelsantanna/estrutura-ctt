@@ -163,10 +163,11 @@ Import performance:
 
 
   # 1. Copie os arquivos
-  cp [origem]/database/migrations/2025_01_19_200000_create_final_address_structure.php
-  database/migrations/
-  cp [origem]/app/Console/Commands/ImportCttData.php app/Console/Commands/
-  cp -r [origem]/storage/app/ctt storage/app/
+  database/migrations/2025_01_19_200000_create_final_address_structure.php
+  app/Console/Commands/ImportCttData.php
+  storage/app/ctt/distritos.txt
+  storage/app/ctt/concelhos.txt
+  storage/app/ctt/todos_cp.txt
 
   # 2. Execute
   php artisan migrate
