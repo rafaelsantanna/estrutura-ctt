@@ -160,3 +160,14 @@ Import performance:
 - ~50,000 localities
 - Processing speed: ~400-800 records/second
 - Memory usage: Max 256MB (configurable)
+
+
+  # 1. Copie os arquivos
+  cp [origem]/database/migrations/2025_01_19_200000_create_final_address_structure.php
+  database/migrations/
+  cp [origem]/app/Console/Commands/ImportCttData.php app/Console/Commands/
+  cp -r [origem]/storage/app/ctt storage/app/
+
+  # 2. Execute
+  php artisan migrate
+  php artisan import:ctt-data --force
