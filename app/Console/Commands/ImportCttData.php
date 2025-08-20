@@ -43,11 +43,28 @@ class ImportCttData extends Command
 
     public function handle()
     {
-        $this->dataPath = $this->option('path') ?: base_path('todos_cp');
-        $this->batchSize = (int) $this->option('batch-size');
-        $this->memoryLimit = (int) $this->option('memory-limit');
+        // Validação segura do path - previne Path Traversal
+        $customPath = $this->option('path');
+        if ($customPath) {
+            $realPath = realpath($customPath);
+            $basePath = realpath(base_path());
+            
+            if (!$realPath || !str_starts_with($realPath, $basePath)) {
+                $this->error('Path inválido ou fora do diretório do projeto');
+                return 1;
+            }
+            $this->dataPath = $realPath;
+        } else {
+            $this->dataPath = base_path('todos_cp');
+        }
         
-        // Configura limite de memória
+        $this->batchSize = (int) $this->option('batch-size');
+        
+        // Validação segura do memory limit - entre 128MB e 2048MB
+        $memoryLimit = (int) $this->option('memory-limit');
+        $this->memoryLimit = max(128, min(2048, $memoryLimit));
+        
+        // Configura limite de memória validado
         ini_set('memory_limit', $this->memoryLimit . 'M');
         
         if (!is_dir($this->dataPath)) {
@@ -433,13 +450,30 @@ class ImportCttData extends Command
 
     private function clearCachePeriodically()
     {
-        // Mantém apenas últimos 10k registros no cache
+        // Limpa cache completamente e reconstrói apenas com entradas recentes
+        // Previne memory leak causado por array_slice mantendo referências
         if (count($this->localidadesCache) > 10000) {
-            $this->localidadesCache = array_slice($this->localidadesCache, -5000, null, true);
+            // Cria novo array ao invés de slice para liberar memória completamente
+            $newCache = [];
+            $counter = 0;
+            foreach (array_reverse($this->localidadesCache, true) as $key => $value) {
+                if (++$counter > 5000) break;
+                $newCache[$key] = $value;
+            }
+            $this->localidadesCache = $newCache;
+            unset($newCache);
         }
         
         if (count($this->freguesiasCache) > 10000) {
-            $this->freguesiasCache = array_slice($this->freguesiasCache, -5000, null, true);
+            // Cria novo array ao invés de slice para liberar memória completamente
+            $newCache = [];
+            $counter = 0;
+            foreach (array_reverse($this->freguesiasCache, true) as $key => $value) {
+                if (++$counter > 5000) break;
+                $newCache[$key] = $value;
+            }
+            $this->freguesiasCache = $newCache;
+            unset($newCache);
         }
         
         // Força garbage collection
@@ -500,8 +534,31 @@ class ImportCttData extends Command
             return $text;
         }
         
-        // Força conversão de ISO-8859-1 para UTF-8 (padrão dos arquivos CTT)
-        return mb_convert_encoding($text, 'UTF-8', 'ISO-8859-1');
+        // Valida se o texto é string e não excede limite razoável
+        if (!is_string($text) || strlen($text) > 1000) {
+            return '';
+        }
+        
+        // Detecta encoding atual de forma segura
+        $currentEncoding = mb_detect_encoding($text, ['ISO-8859-1', 'UTF-8', 'ASCII'], true);
+        
+        // Se não conseguir detectar ou já for UTF-8, retorna como está
+        if (!$currentEncoding || $currentEncoding === 'UTF-8') {
+            return $text;
+        }
+        
+        // Converte apenas se for ISO-8859-1 (padrão dos arquivos CTT)
+        if ($currentEncoding === 'ISO-8859-1') {
+            try {
+                return mb_convert_encoding($text, 'UTF-8', 'ISO-8859-1');
+            } catch (\Exception $e) {
+                // Em caso de erro, retorna texto original
+                Log::warning('Erro ao converter encoding', ['text' => substr($text, 0, 50)]);
+                return $text;
+            }
+        }
+        
+        return $text;
     }
 
     private function getMemoryUsage()

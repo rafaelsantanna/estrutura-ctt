@@ -32,7 +32,7 @@ return new class extends Migration
             $table->string('nome', 100);
             $table->timestamps();
             
-            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
+            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('restrict');
             $table->unique(['codigo_distrito', 'codigo_concelho']);
             $table->index('nome');
             $table->index('codigo_distrito');
@@ -47,11 +47,11 @@ return new class extends Migration
             $table->string('nome', 150);
             $table->timestamps();
             
-            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
+            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('restrict');
             $table->foreign(['codigo_distrito', 'codigo_concelho'])
                   ->references(['codigo_distrito', 'codigo_concelho'])
                   ->on('concelhos')
-                  ->onDelete('cascade');
+                  ->onDelete('restrict');
             
             $table->unique(['codigo_distrito', 'codigo_concelho', 'nome']);
             $table->index('nome');
@@ -68,11 +68,11 @@ return new class extends Migration
             $table->unsignedBigInteger('freguesia_id')->nullable();
             $table->timestamps();
             
-            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
+            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('restrict');
             $table->foreign(['codigo_distrito', 'codigo_concelho'])
                   ->references(['codigo_distrito', 'codigo_concelho'])
                   ->on('concelhos')
-                  ->onDelete('cascade');
+                  ->onDelete('restrict');
             $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
             
             $table->unique(['codigo_distrito', 'codigo_concelho', 'codigo_localidade'], 'localidades_unique');
@@ -96,7 +96,7 @@ return new class extends Migration
             $table->boolean('is_primary')->default(false); // Identifica endereço principal para cada CP
             $table->timestamps();
             
-            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
+            $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('restrict');
             $table->foreign('localidade_id')->references('id')->on('localidades')->onDelete('set null');
             $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
             
