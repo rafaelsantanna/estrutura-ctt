@@ -8,10 +8,8 @@ return new class extends Migration
 {
     /**
      * Estrutura Final Otimizada - 5 Tabelas
-     * Atende todos os requisitos do tech lead:
      * - Hierarquia: distrito > concelho > freguesia > localidade
      * - Busca por código postal tipo GeoAPI
-     * - Simples mas completa
      */
     public function up(): void
     {
