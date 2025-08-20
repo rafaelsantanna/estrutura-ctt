@@ -33,7 +33,13 @@ class ImportCttData extends Command
         'localidades' => 0,
         'freguesias' => 0,
         'codigos_postais' => 0,
+        'unique_postal_codes' => 0,
+        'total_addresses' => 0,
+        'skipped_duplicates' => 0,
     ];
+    
+    // Track postal codes to mark first occurrence as primary
+    private $postalCodesSeen = [];
 
     public function handle()
     {
@@ -126,7 +132,11 @@ class ImportCttData extends Command
         
         // Bulk insert
         if (!empty($data)) {
-            DB::table('distritos')->insertOrIgnore($data);
+            DB::table('distritos')->upsert(
+                $data,
+                ['codigo'], // unique columns
+                ['nome', 'updated_at'] // columns to update on conflict
+            );
             $this->stats['distritos'] = count($data);
         }
         
@@ -170,7 +180,11 @@ class ImportCttData extends Command
         
         // Bulk insert
         if (!empty($data)) {
-            DB::table('concelhos')->insertOrIgnore($data);
+            DB::table('concelhos')->upsert(
+                $data,
+                ['codigo_distrito', 'codigo_concelho'], // unique columns
+                ['nome', 'updated_at'] // columns to update on conflict
+            );
             $this->stats['concelhos'] = count($data);
         }
         
@@ -239,17 +253,35 @@ class ImportCttData extends Command
                     $cpKey = "{$data['cp4']}_{$data['cp3']}";
                     $morada = $this->buildMoradaCompleta($data);
                     
-                    $batchCodigosPostais[$cpKey] = [
-                        'codigo_distrito' => $data['codigo_distrito'],
-                        'codigo_concelho' => $data['codigo_concelho'],
-                        'codigo_localidade' => $data['codigo_localidade'],
-                        'cp4' => $data['cp4'],
-                        'cp3' => $data['cp3'],
-                        'designacao_postal' => $data['designacao_postal'],
-                        'morada' => $morada,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ];
+                    // Create unique key for address (CP + designacao + morada)
+                    $addressKey = $cpKey . '_' . md5($data['designacao_postal'] . '_' . $morada);
+                    
+                    // Check if this exact address already exists in current batch
+                    if (!isset($batchCodigosPostais[$addressKey])) {
+                        // Determine if this is the primary address for this postal code
+                        $isPrimary = !isset($this->postalCodesSeen[$cpKey]);
+                        if ($isPrimary) {
+                            $this->postalCodesSeen[$cpKey] = true;
+                            $this->stats['unique_postal_codes']++;
+                        }
+                        
+                        $batchCodigosPostais[$addressKey] = [
+                            'codigo_distrito' => $data['codigo_distrito'],
+                            'codigo_concelho' => $data['codigo_concelho'],
+                            'codigo_localidade' => $data['codigo_localidade'],
+                            'cp4' => $data['cp4'],
+                            'cp3' => $data['cp3'],
+                            'designacao_postal' => $data['designacao_postal'],
+                            'morada' => $morada,
+                            'is_primary' => $isPrimary,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ];
+                        
+                        $this->stats['total_addresses']++;
+                    } else {
+                        $this->stats['skipped_duplicates']++;
+                    }
                     
                     $processedCount++;
                 }
@@ -292,21 +324,31 @@ class ImportCttData extends Command
         DB::transaction(function() use ($localidades, $freguesias, $codigosPostais) {
             // Bulk insert localidades
             if (!empty($localidades)) {
-                DB::table('localidades')->insertOrIgnore(array_values($localidades));
+                DB::table('localidades')->upsert(
+                    array_values($localidades),
+                    ['codigo_distrito', 'codigo_concelho', 'codigo_localidade'], // unique columns
+                    ['nome', 'updated_at'] // columns to update on conflict
+                );
                 $this->stats['localidades'] += count($localidades);
             }
             
             // Bulk insert freguesias
             if (!empty($freguesias)) {
-                DB::table('freguesias')->insertOrIgnore(array_values($freguesias));
+                DB::table('freguesias')->upsert(
+                    array_values($freguesias),
+                    ['codigo_distrito', 'codigo_concelho', 'nome'], // unique columns
+                    ['updated_at'] // columns to update on conflict
+                );
                 $this->stats['freguesias'] += count($freguesias);
             }
             
             // Bulk insert códigos postais
             if (!empty($codigosPostais)) {
+                // Use regular insert for postal codes since we now allow duplicates
+                // and have already filtered duplicates in our batch logic
                 $chunks = array_chunk($codigosPostais, 1000);
                 foreach ($chunks as $chunk) {
-                    DB::table('codigos_postais')->insertOrIgnore(array_values($chunk));
+                    DB::table('codigos_postais')->insert(array_values($chunk));
                 }
                 $this->stats['codigos_postais'] += count($codigosPostais);
             }
@@ -414,6 +456,12 @@ class ImportCttData extends Command
             return null;
         }
         
+        // Valida concelho (municipality) - this is critical for foreign key constraints
+        $concelhoKey = "{$codigoDistrito}_{$codigoConcelho}";
+        if (!isset($this->concelhosCache[$concelhoKey])) {
+            return null;
+        }
+        
         return [
             'codigo_distrito' => $codigoDistrito,
             'codigo_concelho' => $codigoConcelho,
@@ -471,9 +519,19 @@ class ImportCttData extends Command
                 ['Concelhos', number_format($this->stats['concelhos'])],
                 ['Localidades', number_format($this->stats['localidades'])],
                 ['Freguesias', number_format($this->stats['freguesias'])],
-                ['Códigos Postais', number_format($this->stats['codigos_postais'])]
+                ['Códigos Postais (Total)', number_format($this->stats['codigos_postais'])],
+                ['Códigos Postais Únicos', number_format($this->stats['unique_postal_codes'])],
+                ['Endereços Totais', number_format($this->stats['total_addresses'])],
+                ['Duplicados Ignorados', number_format($this->stats['skipped_duplicates'])]
             ]
         );
+        
+        // Calculate and display import rate
+        $importRate = $this->stats['total_addresses'] > 0 
+            ? round(($this->stats['codigos_postais'] / $this->stats['total_addresses']) * 100, 2)
+            : 0;
+            
+        $this->info("Taxa de Importação: {$importRate}% ({$this->stats['codigos_postais']} de {$this->stats['total_addresses']} endereços)");
         
         $this->info('Memória utilizada: ' . $this->getMemoryUsage());
     }

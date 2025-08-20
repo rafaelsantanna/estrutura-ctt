@@ -93,6 +93,7 @@ return new class extends Migration
             $table->unsignedBigInteger('freguesia_id')->nullable();
             $table->string('designacao_postal', 200);
             $table->string('morada', 500)->nullable(); // Morada simplificada se houver
+            $table->boolean('is_primary')->default(false); // Identifica endereço principal para cada CP
             $table->timestamps();
             
             $table->foreign('codigo_distrito')->references('codigo')->on('distritos')->onDelete('cascade');
@@ -100,9 +101,12 @@ return new class extends Migration
             $table->foreign('freguesia_id')->references('id')->on('freguesias')->onDelete('set null');
             
             // Índices otimizados para busca tipo GeoAPI
-            $table->unique(['cp4', 'cp3']);
+            // NOTA: Removido unique constraint em ['cp4', 'cp3'] para permitir múltiplos endereços por código postal
             $table->index('cp4');
-            $table->index(['cp4', 'cp3']);
+            $table->index(['cp4', 'cp3']); // Busca por código postal completo
+            $table->index(['cp4', 'cp3', 'is_primary'], 'cp_primary_lookup'); // Busca endereço principal
+            $table->index(['cp4', 'cp3', 'designacao_postal'], 'cp_designacao_lookup'); // Busca com designação
+            $table->index(['cp4', 'cp3', 'designacao_postal', 'morada'], 'address_uniqueness_check'); // Verificação de unicidade real
             $table->index('designacao_postal');
             $table->index(['codigo_distrito', 'codigo_concelho']);
             $table->index('localidade_id');
